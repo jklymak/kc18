@@ -1,184 +1,351 @@
-from numpy import *
-from scipy import *
-from pylab import *
-import numpy.matlib as matlib
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import xarray as xr
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 from shutil import copy
 from os import mkdir
+import otis_tide_pred as otp
 import os
+import logging
+import shutil,os,glob
+
+
+
+logging.basicConfig(level=logging.DEBUG)
+
+_log = logging.getLogger(__name__)
+
 
 def lininc(n,Dx,dx0):
   a=(Dx-n*dx0)*2./n/(n+1)
   dx = dx0+arange(1.,n+1.,1.)*a
   return dx
 
-Fr=0.13
-H = 2000.
-h0=500.
-om = 2.*pi/12.42/3600.
-N0=5.2e-3
-u0=Fr*N0*h0
 
 
-outdir='../runs/RunFr%03d' % (10000*Fr)
-try:
-  mkdir(outdir)
-except:
-  print( outdir+' Exists')
-try:
-  mkdir(outdir+'/figs')
-except:
-  print(outdir+'/figs Exists')
-copy('./gendata.py',outdir)
+def copy_dirs(outdir):
+    #### Set up the output directory
+    backupmodel=1
+    if backupmodel:
+      try:
+        mkdir(outdir0)
+      except:
+        import datetime
+        import time
+        ts = time.time()
+        st=datetime.datetime.fromtimestamp(ts).strftime('%Y%m%d%H%M%S')
+        shutil.move(outdir0[:-1],outdir0[:-1]+'.bak'+st)
+        mkdir(outdir0)
+
+        _log.info(outdir0+' Exists')
+
+      outdir=outdir0
+      try:
+        mkdir(outdir)
+      except:
+        _log.info(outdir+' Exists')
+      outdir=outdir+'input/'
+      try:
+        mkdir(outdir)
+      except:
+        _log.info(outdir+' Exists')
+      try:
+          mkdir(outdir+'/figs/')
+      except:
+        pass
+
+      copy('gendata.py',outdir)
+    else:
+      outdir=outdir+'input/'
+
+    ## Copy some other files
+    _log.info( "Copying files")
+
+    try:
+      shutil.rmtree(outdir+'/../code/')
+    except:
+      _log.info("code is not there anyhow")
+    shutil.copytree('../code', outdir+'/../code/')
+    shutil.copytree('../python', outdir+'/../python/')
+
+    try:
+      shutil.rmtree(outdir+'/../build/')
+    except:
+      _log.info("build is not there anyhow")
+    _log.info(outdir+'/../build/')
+    mkdir(outdir+'/../build/')
+
+    # copy any data that is in the local indata
+    shutil.copytree('../indata/', outdir+'/../indata/')
+
+
+Hmax = 5200
+comments = 'Kauaii Channel HighResRun'
+outdir0 = '../results/KC18r01/'
+outdir = outdir0
+indir = outdir0 + '/indata/'
+figdir = outdir0 + 'input/figs'
+
+copy_dirs(outdir0)
 
 # These must match ../code/SIZE.h
-ny = 1
-nx = 4*20
-nz = 25
+nx = 16 * 50  # 8*64
+ny = 16 * 50 # 8*64
+nz = 250
+innerw = int(440 / 2)
 
-# y direction:
-dy = 1000
-# x direction
-xt = 410e3
+#########
+# dz
 
-nmid = 50
-dx0=300.
-nleft = int((nx-nmid)/2)
-print(nleft)
-nright = int((nx-nmid)/2)
-dx = zeros(nx)
-dxleft = flipud(lininc(nleft,200.e3,dx0))
-dxright = lininc(nright,200.e3,dx0)
-dx[0:nleft]=dxleft
-dx[(nleft):(nleft+nmid)]=dx0
-dx[(nleft+nmid):]=dxright
-x=cumsum(dx)
-x = x-x[int(np.floor(nx/2))]
-
-with open(outdir+"/delXvar.bin", "wb") as f:
-	dx.tofile(f)
-f.close()
-# plot
-if 1:
-    plot(x/1000.,dx)
-    xlim([-10,10])
-    savefig(outdir+'/figs/dx.pdf')
-
-# topo
-sigma = 4000. # m
-
-topo = 1500*exp(-x*x/(sigma**2))-1500+h0
-#topo = h0*exp(-x*x/(3000**2))
-print(shape(topo))
-topo[topo<0.]=0.
-topo=-H+topo
-topo[topo<-H]=-H
-
-# plot
-if 1:
-    clf()
-    plot(x/1.e3,topo)
-    # xlim([-20.,20.])
-    savefig(outdir+'/figs/topo.pdf')
-
-
-with open(outdir+"/topo.bin", "wb") as f:
-	topo.tofile(f)
-f.close()
-# dz:
-# dz is from the surface down (right?).  Its saved as positive.
-
-dz=zeros(nz)+H/nz
+Hmax = 5200
+dz = np.ones(250) * 10
+for i in range(100, 250):
+    dz[i] = dz[i-1] * 1.012
+z = np.cumsum(dz)
+Hmax = z[-1]
 
 with open(outdir+"/delZvar.bin", "wb") as f:
 	dz.tofile(f)
 f.close()
 
-# temperature profile...
-g=9.8
-alpha = 2e-4
-T0 = 28+cumsum(N0**2/g/alpha*(-dz))
+if 1:
+    fig, ax = plt.subplots()
+    ax.plot(dz, z)
+    fig.savefig(figdir + '/dz.pdf')
+
+# FLIP!
+lon0 = -158-37.77/60;
+lat0 =21+40.780/60;
+mpernm = 1852
+
+#### Horizontal Grid
+
+def ll2xy(lon, lat):
+    x = (lon - lon0) * mpernm * 60 * np.cos(lat0 * np.pi / 180)
+    y = (lat - lat0) * mpernm * 60
+    return x, y
+
+
+def xy2ll(x, y):
+    lon = lon0 + x / (mpernm * 60 * np.cos(lat0 * np.pi / 180))
+    lat = lat0 + y / (mpernm * 60)
+    return lon, lat
+
+def doubleinterp(x, y, z, xint, yint):
+    """
+    Interpolate z first in x and then in y.
+    """
+    m, n = np.shape(z)
+    mnew = len(yint)
+    nnew = len(xint)
+
+    znew0 = np.zeros((m, nnew))
+    for i in range(m):
+        ind = np.isfinite(z[i, :])
+        znew0[i, :] = np.interp(xint, x[ind], z[i, ind])
+
+    znew = np.zeros((mnew, nnew))
+    for j in range(nnew):
+        ind = np.isfinite(znew0[:, j])
+        znew[:, j] = np.interp(yint, y[ind], znew0[ind, j])
+
+    return znew
+
+# dx
+
+dx = np.ones(nx)
+inner = range(int(nx/2) - innerw, int(nx/2) + innerw)
+dx[inner] = 100
+for i in range(inner[-1], nx):
+    dx[i] = dx[i-1] * 1.02
+for i in range(inner[0], -1, -1):
+    dx[i] = dx[i+1] * 1.02
+
+x = np.cumsum(dx)
+x = x - np.mean(x)
+
+with open(outdir+"/delXvar.bin", "wb") as f:
+	dx.tofile(f)
+f.close()
+
+# dy
+
+dy = np.ones(ny)
+inner = range(int(ny/2) - innerw, int(ny/2) + innerw)
+dy[inner] = 100
+for i in range(inner[-1], ny):
+    dy[i] = dy[i-1] * 1.02
+for i in range(inner[0], -1, -1):
+    dy[i] = dy[i+1] * 1.02
+
+y = np.cumsum(dy)
+y = y - np.mean(y)
+
+with open(outdir+"/delYvar.bin", "wb") as f:
+	dy.tofile(f)
+f.close()
+
+# plot
+if 1:
+    fig, ax = plt.subplots(2, 1)
+    ax[0].plot(x/1000., dx)
+    ax[1].plot(y/1000., dy)
+    fig.savefig(figdir+'/dxdy.pdf')
+
+############################
+# Topography
+ds = xr.open_dataset('../indata/OahuFilled.nc')
+ds['x'], ds['y'] = ll2xy(ds['lon'], ds['lat'])
+
+ss = xr.open_dataset('../indata/SmithSandwellNearHi.nc')
+ss['x'], ss['y'] = ll2xy(ss['longitude'] - 360, ss['latitude'])
+
+topo0 = doubleinterp(ss.x, ss.y, ss.ROSE, x, y)
+iny = (ds.y.values[0] <= y) & ( y <= ds.y.values[-1])
+inx = (ds.x.values[0] <= x) & (x <= ds.x.values[-1])
+print(len(np.where(inx)[0]))
+topo = topo0.copy()
+toponew = doubleinterp(ds.x, ds.y, ds.depths, x[inx], y[iny])
+for nn, i in enumerate(np.where(inx)[0]):
+    topo[iny, i] = toponew[:, nn]
+
+topo[topo < -Hmax] = -Hmax
+
+
+with open(outdir+"/topo.bin", "wb") as f:
+	topo.tofile(f)
+f.close()
+
+# plot
+if 1:
+    fig, ax = plt.subplots()
+    ax.pcolormesh(x/1.e3, y/1e3, topo, rasterized=True, vmin=-6000, vmax=0)
+    ind = np.where(np.diff(x) == 100)[0]
+    dx = x[ind[-1]] - x[ind[0]]
+    dy = y[ind[-1]] - y[ind[0]]
+    rec = mpatches.Rectangle((x[ind[0]] / 1e3, y[ind[0]] / 1e3),
+            dx / 1e3, dy / 1e3,
+            facecolor='none', edgecolor='r')
+    ax.add_artist(rec)
+    ind = np.where(np.diff(x) <= 1000)[0]
+    dx = x[ind[-1]] - x[ind[0]]
+    dy = y[ind[-1]] - y[ind[0]]
+    rec = mpatches.Rectangle((x[ind[0]] / 1e3, y[ind[0]] / 1e3),
+            dx / 1e3, dy / 1e3,
+            facecolor='none', edgecolor='y')
+    ax.add_artist(rec)
+    indx = np.arange(14, len(x)-14)
+    indy = np.arange(14, len(y)-14)
+    dx = x[indx[-1]] - x[indx[0]]
+    dy = y[indy[-1]] - y[indy[0]]
+    rec = mpatches.Rectangle((x[indx[0]] / 1e3, y[indy[0]] / 1e3),
+            dx / 1e3, dy / 1e3,
+            facecolor='none', edgecolor='c')
+    ax.add_artist(rec)
+    ax.set_aspect(1)
+    fig.savefig(figdir+'/topo.pdf')
+
+
+########
+# Temperature profile...
+tp = xr.open_dataset('../indata/TempProfile.nc')
+z = np.cumsum(dz)
+T0 = np.interp(z, tp.z.values, tp['T'].values)
 
 with open(outdir+"/TRef.bin", "wb") as f:
 	T0.tofile(f)
 f.close()
 
-# save T0 over whole domain
-TT0 = matlib.repmat(T0,nx,1).T
-with open(outdir+"/T0.bin", "wb") as f:
-	TT0.tofile(f)
-
-
-z=cumsum(dz)
 # plot:
 if 1:
-    clf()
-    plot(T0,z)
-    savefig(outdir+'/figs/TO.pdf')
+    fig, ax = plt.subplots()
+    ax.plot(T0,z)
+    fig.savefig(figdir+'/TO.pdf')
 
-# Forcing for boundaries
-dt=3720.
-time = arange(0,12.*3720.,dt)
-print( time/3600./12.4)
-om = 2*pi/12.40/3600;
-uw = u0+0.*time
-ue = u0+0.*time
-# plot:
-if 1:
-    clf()
-    plot(time/3600./12.4,ue,label='Ue')
-    plot(time/3600/12.4,uw,label='Uw')
-    legend()
-    xlabel('t/T')
-    ylabel('Vel')
-    title('%d' % time[-1])
-    savefig(outdir+'/figs/Vels.pdf')
+#############
+# U, V on boundaries from tidal predictions...
+#
 
-# try time,nz,ny...
+# hourly updates (3600 s)
+dates = np.arange(np.datetime64('2002-08-15'), np.datetime64('2002-09-22'),
+                  dtype='datetime64[h]')
 
-uen=zeros((shape(time)[0],nz,ny))
-for j in range(0,ny):
-  for i in range(0,nz):
-    uen[:,i,j]=ue
-#print(uen)
+# South
+lons, lats = xy2ll(x, y[0] + 0 *x)
+h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats, dates)
 
-uwn=zeros((shape(time)[0],nz,ny))
-print(shape(uwn))
-for j in range(0,ny):
-  for i in range(0,nz):
-    uwn[:,i,j]=uw
-#print(uwn)
+# must be time, z, x/y
+u = u[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
+v = v[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
+
+with open(outdir+"/Us.bin","wb") as f:
+  u.tofile(f)
+with open(outdir+"/Vs.bin","wb") as f:
+  v.tofile(f)
+
+# North
+lons, lats = xy2ll(x, y[-1] + 0 *x)
+h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats, dates)
+
+u = u[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
+v = v[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
+
+with open(outdir+"/Un.bin","wb") as f:
+  u.tofile(f)
+with open(outdir+"/Vn.bin","wb") as f:
+  v.tofile(f)
+
+# West
+lons, lats = xy2ll(x[0] + 0 * y, y)
+h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats, dates)
+
+u = u[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
+v = v[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
+
+with open(outdir+"/Uw.bin","wb") as f:
+  u.tofile(f)
+with open(outdir+"/Vw.bin","wb") as f:
+  v.tofile(f)
+
+# East
+lons, lats = xy2ll(x[-1] + 0 * y, y)
+h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats, dates)
+
+u = u[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
+v = v[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
 
 with open(outdir+"/Ue.bin","wb") as f:
-  uen.tofile(f)
+  u.tofile(f)
+with open(outdir+"/Ve.bin","wb") as f:
+  v.tofile(f)
 
-with open(outdir+"/Uw.bin", "wb") as f:
-  uwn.tofile(f)
 
-t=zeros((shape(time)[0],nz,ny))
-for j in range(0,ny):
-	for i in range(0,nz):
-		for k in range(0,shape(time)[0]):
-			t[k,i,j]=T0[i]
-print(shape(t))
-with open(outdir+"/Te.bin", "wb") as f:
-	t.tofile(f)
-f.close()
-with open(outdir+"/Tw.bin", "wb") as f:
-	t.tofile(f)
-f.close()
 
-## Copy some other files
-import shutil
-shutil.copy('data', outdir+'/data')
-shutil.copy('eedata', outdir)
-shutil.copy('data.kl10', outdir)
-shutil.copy('data.mnc', outdir)
-shutil.copy('data.obcs', outdir)
-shutil.copy('data.diagnostics', outdir)
-shutil.copy('data.pkg', outdir+'/data.pkg')
-# also store these.  They are small and helpful to document what we did
-for nm in {'input','code','build_options','analysis'}:
-    to_path = outdir+'/'+nm
-    if os.path.exists(to_path):
-        shutil.rmtree(to_path)
-    shutil.copytree('../'+nm, outdir+'/'+nm)
+_log.info('Writing info to README')
+############ Save to README
+with open('README','r') as f:
+  data=f.read()
+with open('README','w') as f:
+  import datetime
+  import time
+  ts = time.time()
+  st=datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
+  f.write( st+'\n')
+  f.write( outdir+'\n')
+  f.write(comments+'\n\n')
+  f.write(data)
+
+_log.info('All Done!')
+
+_log.info('Archiving to home directory')
+
+try:
+    shutil.rmtree('../archive/'+runname)
+except:
+    pass
+
+shutil.copytree(outdir0+'/input/', '../archive/'+runname+'/input')
+shutil.copytree(outdir0+'/python/', '../archive/'+runname+'/python')
+shutil.copytree(outdir0+'/code', '../archive/'+runname+'/code')
