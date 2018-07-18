@@ -2,9 +2,9 @@
 
 To compile execute
 ```
-/Users/jklymak/MITgcmc66b/MITgcm/tools/genmake2 \
- -optfile=../build_options/darwin_brewgfortranmpi -mods=../code/  \
-  -rootdir=/Users/jklymak/MITgcmc66b/MITgcm
+module load cray-netcdf-hdf5parallel
+
+./MITgcm66h/tools/genmake2 -optfile=../build_options/conrad -mods=../code/ -rootdir=../MITgcm66h -mpi
 
 make depend
 make
