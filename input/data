@@ -61,21 +61,21 @@
 # niter0=0,
 # times are in s
  startTime=0,
- endTime=97500,
- deltaT=12.4,
+ endTime=604800,
+ deltaT=10.0,
  abEps=0.1,
-# once per tide checkpoint...
- pChkptFreq=44640,
+# every 2 days checkpoint...
+ pChkptFreq=172800,
  chkptFreq=0.0,
  dumpFreq=0,
  dumpInitAndLast=.FALSE.
- monitorFreq=1860,
+ monitorFreq=60,
 # Forcing for boundary condition files
  periodicExternalForcing=.TRUE.,
 # 1/12th M2 tidal period...
- externForcingPeriod = 3720.,
-# one tidal period (12 records need to be in OBEuFile, etc)
- externForcingCycle = 44640.,
+ externForcingPeriod = 3600.,
+# 38 days (from gendata)
+ externForcingCycle = 3283200.,
  rwSuffixType=1,
 /
 
@@ -84,7 +84,7 @@
  usingCartesianGrid=.TRUE.,
  usingSphericalPolarGrid=.FALSE.,
  delXfile='delXvar.bin',
- delY=5.e3,
+ delYfile='delYvar.bin',
  delRfile = 'delZvar.bin',
 /
 
@@ -92,5 +92,5 @@
  &PARM05
  bathyFile='topo.bin',
  mdsioLocalDir='../../',
- hydrogThetaFile='T0.bin',
+# hydrogThetaFile='T0.bin',
  /

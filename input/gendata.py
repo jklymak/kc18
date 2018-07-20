@@ -29,36 +29,30 @@ def copy_dirs(outdir):
     #### Set up the output directory
     backupmodel=1
     if backupmodel:
-      try:
-        mkdir(outdir0)
-      except:
-        import datetime
-        import time
-        ts = time.time()
-        st=datetime.datetime.fromtimestamp(ts).strftime('%Y%m%d%H%M%S')
-        shutil.move(outdir0[:-1],outdir0[:-1]+'.bak'+st)
-        mkdir(outdir0)
+        try:
+            mkdir(outdir0)
+        except:
+            import datetime
+            import time
+            ts = time.time()
+            st=datetime.datetime.fromtimestamp(ts).strftime('%Y%m%d%H%M%S')
+            shutil.move(outdir0[:-1],outdir0[:-1]+'.bak'+st)
+            mkdir(outdir0)
 
-        _log.info(outdir0+' Exists')
-
-      outdir=outdir0
-      try:
+            _log.info(outdir0+' Exists')
+        outdir=outdir0
+        try:
+            mkdir(outdir)
+        except:
+            _log.info(outdir+' Exists')
+        outdir=outdir+'input/'
         mkdir(outdir)
-      except:
-        _log.info(outdir+' Exists')
-      outdir=outdir+'input/'
-      try:
-        mkdir(outdir)
-      except:
-        _log.info(outdir+' Exists')
-      try:
-          mkdir(outdir+'/figs/')
-      except:
-        pass
-
-      copy('gendata.py',outdir)
-    else:
-      outdir=outdir+'input/'
+        mkdir(outdir+'/figs/')
+        copy('gendata.py', outdir)
+        for tocp in ['data', 'data.pkg', 'data.obcs', 'data.kl10', 'README',
+                    'eedata', 'otis_tide_pred.py', 'runModel.sh',
+                    'data.diagnostics']:
+            copy(tocp, outdir)
 
     ## Copy some other files
     _log.info( "Copying files")
@@ -76,15 +70,19 @@ def copy_dirs(outdir):
       _log.info("build is not there anyhow")
     _log.info(outdir+'/../build/')
     mkdir(outdir+'/../build/')
+    builddir = outdir+'/../build/'
+    copy('../build/Makefile', builddir)
+    copy('../build/mitgcmuv', builddir)
 
     # copy any data that is in the local indata
     shutil.copytree('../indata/', outdir+'/../indata/')
 
 
 Hmax = 5200
+runname = 'KC18r01'
 comments = 'Kauaii Channel HighResRun'
-outdir0 = '../results/KC18r01/'
-outdir = outdir0
+outdir0 = '../results/' + runname + '/'
+outdir = outdir0 + '/input/'
 indir = outdir0 + '/indata/'
 figdir = outdir0 + 'input/figs'
 
@@ -154,14 +152,15 @@ def doubleinterp(x, y, z, xint, yint):
     return znew
 
 # dx
+expandrate = 1.025
 
 dx = np.ones(nx)
 inner = range(int(nx/2) - innerw, int(nx/2) + innerw)
 dx[inner] = 100
 for i in range(inner[-1], nx):
-    dx[i] = dx[i-1] * 1.02
+    dx[i] = dx[i-1] * expandrate
 for i in range(inner[0], -1, -1):
-    dx[i] = dx[i+1] * 1.02
+    dx[i] = dx[i+1] * expandrate
 
 x = np.cumsum(dx)
 x = x - np.mean(x)
@@ -176,9 +175,9 @@ dy = np.ones(ny)
 inner = range(int(ny/2) - innerw, int(ny/2) + innerw)
 dy[inner] = 100
 for i in range(inner[-1], ny):
-    dy[i] = dy[i-1] * 1.02
+    dy[i] = dy[i-1] * expandrate
 for i in range(inner[0], -1, -1):
-    dy[i] = dy[i+1] * 1.02
+    dy[i] = dy[i+1] * expandrate
 
 y = np.cumsum(dy)
 y = y - np.mean(y)
@@ -269,12 +268,15 @@ if 1:
 #
 
 # hourly updates (3600 s)
-dates = np.arange(np.datetime64('2002-08-15'), np.datetime64('2002-09-22'),
+dates = np.arange(np.datetime64('2002-08-28'), np.datetime64('2002-09-26'),
                   dtype='datetime64[h]')
+print(f'{len(dates)} dates')
 
 # South
 lons, lats = xy2ll(x, y[0] + 0 *x)
-h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats, dates)
+h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats,
+                        dates)
+bad = depths < 50; u[:, bad] = 0; v[:, bad] = 0
 
 # must be time, z, x/y
 u = u[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
@@ -288,6 +290,7 @@ with open(outdir+"/Vs.bin","wb") as f:
 # North
 lons, lats = xy2ll(x, y[-1] + 0 *x)
 h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats, dates)
+bad = depths < 50; u[:, bad] = 0; v[:, bad] = 0
 
 u = u[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
 v = v[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
@@ -300,6 +303,7 @@ with open(outdir+"/Vn.bin","wb") as f:
 # West
 lons, lats = xy2ll(x[0] + 0 * y, y)
 h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats, dates)
+bad = depths < 50; u[:, bad] = 0; v[:, bad] = 0
 
 u = u[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
 v = v[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
@@ -312,6 +316,7 @@ with open(outdir+"/Vw.bin","wb") as f:
 # East
 lons, lats = xy2ll(x[-1] + 0 * y, y)
 h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats, dates)
+bad = depths < 50; u[:, bad] = 0; v[:, bad] = 0
 
 u = u[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
 v = v[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
