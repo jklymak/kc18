@@ -10,7 +10,7 @@ import otis_tide_pred as otp
 import os
 import logging
 import shutil,os,glob
-
+import scipy.interpolate as sciint
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -86,7 +86,8 @@ outdir = outdir0 + '/input/'
 indir = outdir0 + '/indata/'
 figdir = outdir0 + 'input/figs'
 
-copy_dirs(outdir0)
+if 0:
+    copy_dirs(outdir0)
 
 # These must match ../code/SIZE.h
 nx = 16 * 50  # 8*64
@@ -117,38 +118,46 @@ if 1:
 lon0 = -158-37.77/60;
 lat0 =21+40.780/60;
 mpernm = 1852
-
+dhead0 = 26.2516054
 #### Horizontal Grid
 
-def ll2xy(lon, lat):
+def ll2xy(lon, lat, dhead=0):
     x = (lon - lon0) * mpernm * 60 * np.cos(lat0 * np.pi / 180)
     y = (lat - lat0) * mpernm * 60
-    return x, y
+    xx = (x + 1j * y) * np.exp(1j * np.pi * dhead / 180)
+    return np.real(xx), np.imag(xx)
 
 
-def xy2ll(x, y):
-    lon = lon0 + x / (mpernm * 60 * np.cos(lat0 * np.pi / 180))
-    lat = lat0 + y / (mpernm * 60)
+def xy2ll(x, y, dhead=0):
+    xx = (x + 1j * y) * np.exp( -1j * np.pi * dhead / 180)
+    lon = lon0 + np.real(xx) / (mpernm * 60 * np.cos(lat0 * np.pi / 180))
+    lat = lat0 + np.imag(xx) / (mpernm * 60)
     return lon, lat
 
-def doubleinterp(x, y, z, xint, yint):
+def doubleinterp(x, y, z, xint, yint, dhead=0):
     """
     Interpolate z first in x and then in y.
+
     """
-    m, n = np.shape(z)
-    mnew = len(yint)
-    nnew = len(xint)
+    XX, YY = np.meshgrid(xint, yint)
+    XX = (XX + 1j * YY) * np.exp(1j * dhead / 180. * np.pi)
 
-    znew0 = np.zeros((m, nnew))
-    for i in range(m):
-        ind = np.isfinite(z[i, :])
-        znew0[i, :] = np.interp(xint, x[ind], z[i, ind])
-
-    znew = np.zeros((mnew, nnew))
-    for j in range(nnew):
-        ind = np.isfinite(znew0[:, j])
-        znew[:, j] = np.interp(yint, y[ind], znew0[ind, j])
-
+    xint = np.real(XX)
+    yint = np.imag(XX)
+    print('xinit', xint[:1000])
+    znew = 0 * yint
+    print(np.shape(znew))
+    print(np.shape(x), np.shape(y), np.shape(z))
+    f = sciint.RectBivariateSpline(x, y, z)
+    nrows, ncols = np.shape(xint)
+    xint = xint.flatten()
+    yint = yint.flatten()
+    znew = f(xint, yint, grid=False)
+    # set bad if outside bounds of x, y
+    bad = np.argwhere((xint > x[-1]) | (xint < x[0]) |
+                      (yint > y[-1]) | (yint < y[0]))
+    znew[bad] = np.NaN
+    znew = znew.reshape(nrows, ncols)
     return znew
 
 # dx
@@ -196,21 +205,47 @@ if 1:
 ############################
 # Topography
 ds = xr.open_dataset('../indata/OahuFilled.nc')
-ds['x'], ds['y'] = ll2xy(ds['lon'], ds['lat'])
-
+ds['x'], ds['y'] = ll2xy(ds['lon'], ds['lat'], dhead=0)
+print(np.shape(ds['x']), np.shape(ds['y']))
 ss = xr.open_dataset('../indata/SmithSandwellNearHi.nc')
 ss['x'], ss['y'] = ll2xy(ss['longitude'] - 360, ss['latitude'])
+print(ss.x[:, 0])
+print(ss.x[:, 1])
+print(ss.y[0, :])
+print(ss.y[1, :])
 
-topo0 = doubleinterp(ss.x, ss.y, ss.ROSE, x, y)
-iny = (ds.y.values[0] <= y) & ( y <= ds.y.values[-1])
-inx = (ds.x.values[0] <= x) & (x <= ds.x.values[-1])
-print(len(np.where(inx)[0]))
-topo = topo0.copy()
-toponew = doubleinterp(ds.x, ds.y, ds.depths, x[inx], y[iny])
-for nn, i in enumerate(np.where(inx)[0]):
-    topo[iny, i] = toponew[:, nn]
+topo0 = doubleinterp(ss.x.data[:, 0], ss.y.data[0, :], ss.ROSE.data.T, x, y, dhead=-dhead0)
+print(topo0[:, 400])
+print(np.shape(topo0))
+if 1:
+    fig, ax = plt.subplots()
+    ax.pcolormesh(x/1.e3, y/1e3, topo0, rasterized=True, vmin=-6000, vmax=6000)
+    ind = np.where(np.diff(x) == 100)[0]
+    ax.set_aspect(1)
+    fig.savefig(figdir+'/topo0.pdf')
+
+toponew = doubleinterp(ds.x.data[:, 0], ds.y.data[0, :], ds.depths.T, x, y, dhead=-dhead0)
+if 1:
+    fig, ax = plt.subplots()
+    ax.pcolormesh(x/1.e3, y/1e3, toponew, rasterized=True, vmin=-6000, vmax=0)
+    ind = np.where(np.diff(x) == 100)[0]
+    ax.set_aspect(1)
+    fig.savefig(figdir+'/toponew.pdf')
+
+topo = topo0
+for i in range(len(x)):
+    iny = np.where(np.isfinite(toponew[:, i]))[0]
+    if len(iny) > 0:
+        topo[iny, i] = toponew[iny, i]
 
 topo[topo < -Hmax] = -Hmax
+
+if 1:
+    fig, ax = plt.subplots()
+    ax.pcolormesh(x/1.e3, y/1e3, topo, rasterized=True, vmin=-6000, vmax=0)
+    ind = np.where(np.diff(x) == 100)[0]
+    ax.set_aspect(1)
+    fig.savefig(figdir+'/topo.pdf')
 
 
 with open(outdir+"/topo.bin", "wb") as f:
@@ -273,9 +308,12 @@ dates = np.arange(np.datetime64('2002-08-28'), np.datetime64('2002-09-26'),
 print(f'{len(dates)} dates')
 
 # South
-lons, lats = xy2ll(x, y[0] + 0 *x)
+lons, lats = xy2ll(x, y[0] + 0 *x, dhead=dhead0)
 h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats,
                         dates)
+U = (u + 1j * v) * np.exp(1j * dhead0 * np.pi / 180)
+u = np.real(U)
+v = np.imag(U)
 bad = depths < 50; u[:, bad] = 0; v[:, bad] = 0
 
 # must be time, z, x/y
@@ -288,8 +326,11 @@ with open(outdir+"/Vs.bin","wb") as f:
   v.tofile(f)
 
 # North
-lons, lats = xy2ll(x, y[-1] + 0 *x)
+lons, lats = xy2ll(x, y[-1] + 0 *x, dhead=dhead0)
 h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats, dates)
+U = (u + 1j * v) * np.exp(1j * dhead0 * np.pi / 180)
+u = np.real(U)
+v = np.imag(U)
 bad = depths < 50; u[:, bad] = 0; v[:, bad] = 0
 
 u = u[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
@@ -301,8 +342,11 @@ with open(outdir+"/Vn.bin","wb") as f:
   v.tofile(f)
 
 # West
-lons, lats = xy2ll(x[0] + 0 * y, y)
+lons, lats = xy2ll(x[0] + 0 * y, y, dhead=dhead0)
 h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats, dates)
+U = (u + 1j * v) * np.exp(1j * dhead0 * np.pi / 180)
+u = np.real(U)
+v = np.imag(U)
 bad = depths < 50; u[:, bad] = 0; v[:, bad] = 0
 
 u = u[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
@@ -314,10 +358,12 @@ with open(outdir+"/Vw.bin","wb") as f:
   v.tofile(f)
 
 # East
-lons, lats = xy2ll(x[-1] + 0 * y, y)
+lons, lats = xy2ll(x[-1] + 0 * y, y, dhead=dhead0)
 h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats, dates)
+U = (u + 1j * v) * np.exp(1j * dhead0 * np.pi / 180)
+u = np.real(U)
+v = np.imag(U)
 bad = depths < 50; u[:, bad] = 0; v[:, bad] = 0
-
 
 u = u[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
 v = v[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
