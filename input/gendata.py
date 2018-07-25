@@ -79,7 +79,7 @@ def copy_dirs(outdir):
 
 
 Hmax = 5200
-runname = 'KC18r01'
+runname = 'KC18r02'
 comments = 'Kauaii Channel HighResRun'
 outdir0 = '../results/' + runname + '/'
 outdir = outdir0 + '/input/'
@@ -318,8 +318,11 @@ lons, lats = xy2ll(x[-1] + 0 * y, y)
 h, u, v, depths = otp.tide_pred('../indata/OtisHOME/Model_haw', lons, lats, dates)
 bad = depths < 50; u[:, bad] = 0; v[:, bad] = 0
 
+
 u = u[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
 v = v[:, np.newaxis, :] + 0 * z[np.newaxis, :, np.newaxis]
+
+print(np.shape(u))
 
 with open(outdir+"/Ue.bin","wb") as f:
   u.tofile(f)

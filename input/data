@@ -14,6 +14,7 @@
  no_slip_sides=.FALSE.,
  no_slip_bottom=.FALSE.,
  viscA4=0.E12,
+ bottomDragQuadratic=0.002,
  diffKhT=1.0E-5,
  diffKzT=1.E-5,
  diffKhS=1.E3,
@@ -65,8 +66,8 @@
  deltaT=10.0,
  abEps=0.1,
 # every 2 days checkpoint...
- pChkptFreq=172800,
- chkptFreq=0.0,
+ pChkptFreq=0,
+ chkptFreq=172800,
  dumpFreq=0,
  dumpInitAndLast=.FALSE.
  monitorFreq=60,
@@ -75,7 +76,7 @@
 # 1/12th M2 tidal period...
  externForcingPeriod = 3600.,
 # 38 days (from gendata)
- externForcingCycle = 3283200.,
+ externForcingCycle = 2505600.,
  rwSuffixType=1,
 /
 
@@ -91,6 +92,6 @@
 # Input datasets
  &PARM05
  bathyFile='topo.bin',
- mdsioLocalDir='../../',
+ mdsioLocalDir='../../junk',
 # hydrogThetaFile='T0.bin',
  /
